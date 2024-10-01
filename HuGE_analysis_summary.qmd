@@ -1,0 +1,188 @@
+---
+title: "HuGe_analysis"
+format: html
+editor: visual
+---
+
+# Load in required packages
+
+You'll really only need standard R packages, nothing from bioconductor currently, but i'm leaving you chunks that will automatically load libraries from both
+
+```{r}
+#| label: Load in required packages
+#| output: false
+CRAN_packages <- c("tidyverse", "httr2", "jsonlite") #list of required CRAN packages
+new_packages <- CRAN_packages[!(CRAN_packages %in% installed.packages()[,"Package"])]
+if(length(new_packages)) install.packages(new_packages)
+lapply(CRAN_packages, require, character.only = TRUE)
+
+bioconductor_packages <- c() #list of required bioconductor packages
+new_packages <- bioconductor_packages[!(bioconductor_packages %in% installed.packages()[,"Package"])]
+if(length(new_packages)) BiocManager::install(new_packages)
+lapply(bioconductor_packages, require, character.only = TRUE)
+
+#create an output data directory, not super necessary, but nice place to save data to
+dir.create("./Output_data", showWarnings = FALSE)
+```
+
+# Create your gene list
+
+Keep in mind that HuGEAMP focuses on *human* genes, so you will want all of the human orthologs of your genes of interest
+
+## Your own gene list
+
+```{r}
+#| label: Load in required packages
+DE_genes_h <- c("APOB", "PCSK9") #update with any genes of interest, can be as long as you want!
+```
+
+## Get human orthologs of ZF genes
+
+```{r}
+#| label: Get human orthologs of ZF genes
+
+#define organisms of interest
+org_in <- "danio"
+org_out <- "9606" #human
+
+#set up connection with alliancegenome.org API
+base_url_alliance <- "https://www.alliancegenome.org"
+endpoint_alliance <- paste0("/api/homologs/", org_in, "/", org_out, "?limit=50000")
+
+req_alliance <- request(paste0(base_url_alliance, endpoint_alliance))
+
+alliance_homology <- req_alliance %>%
+  req_perform() %>%
+  resp_body_string() %>%
+  fromJSON()
+
+alliance_homology <- as_tibble(alliance_homology$results) 
+external_gene_name <- alliance_homology$gene$symbol
+human_gene_name <- alliance_homology$homologGene$symbol
+
+#generate a tibble of ZF genes and human genes, note this is an example taken from some RNAseq i've run, i think you'll have to update some things here
+DE_genes_h <- cbind(external_gene_name, human_gene_name) %>% 
+  as_tibble() %>%
+  right_join(DE_genes) %>%
+  na.omit() %>%
+  pull(human_gene_name)
+```
+
+# Query HuGeAMP database
+
+```{r}
+#| label: Get human orthologs of ZF genes
+index <- "huge" 
+base_url_bioindex <- "https://bioindex.hugeamp.org"
+endpoint_bioindex <- paste0("/api/bio/query/", index)
+req_bioindex <- request(paste0(base_url_bioindex, endpoint_bioindex))
+
+#generate the dataframe you will write data to
+test_df <- tibble()
+
+#query HuGeAMP database 
+for (query in DE_genes_h) {
+  query <- list(q = query)
+  
+  test <- req_bioindex %>%
+    req_url_query(!!!query) %>%
+    req_perform() %>%
+    resp_body_string() %>%
+    fromJSON()
+  
+  #write query to the dataframe
+  test_df <- bind_rows(as_tibble(test$data), test_df)
+  
+  #note when a query was finished
+  print(paste(query, "was a success!"))
+}
+```
+
+## Graph HuGe scores of interest
+
+This is a big work in progress
+
+```{r}
+#this graphs each gene together for a single phenotype - good example of what you can do!
+ggplot(test_df %>% filter(phenotype == "CHOL"), #you currently have to manually set the group you are interested in
+       aes(x = reorder(gene, huge), 
+           y = log(huge))) +
+  stat_summary(geom = "bar", fun.y = mean, position = "dodge") +
+  labs(y = "Log(HuGE score)", #they put this on a log scale!
+       x = "Gene") + 
+  theme_bw()
+```
+
+# HuGeAMP groups
+
+HuGeAMP classified phenotypes into groups, but this wasn't super easy to access, so i manually re-curated each of these phenotype group below. Could be useful to do more unfocused analyses! Currently, this is not being used for anything, but its good information to have.
+
+The big summary graph when you look up a gene in HuGeAMP uses these groups, so it would be nice to try and make those graphs.
+
+## Groups
+
+```{r}
+#| label: Generate HuGeAMP groups
+anthropometric_group <- c("HEIGHT","BMI1yr","WHR","BMIbirth","VATadjBMIHeight","LFR","SCOOPvSTILTS","STILTSvUKHLS","WCadjBMISMK","BMI2yrs","HIPCadjBMI","Obesity","SAT","WAIST","WEIGHT","WHRadjBMI","BMIadjSMK","BMI3mons","BMI8mons","GFAT","BFP","VAT","BMI5yrs","SCOOPvUKHLS","AFR","GFATadjBMIHeight","BMI","ASAT","BMI6mons","BMI6wks","VATtoASAT","BMI1_5yrs","BMI3yrs","WAISTadjBMI","WHRadjBMISMK","ASATadjBMIHeight","ASATtoGFAT","BMI7yrs","VATtoGFAT","ChildObesity","BMI8yrs","HIPC","TFR")
+
+atrial_fibrillation_group <- c("AFxSEX","AIpredictedAF","AF","AFxAGEy65","AFxAGE","AFxAGEo65","AfibFlutter","AFxHTN","AFxBMI")
+
+cardiovascular_group <- c("SBP","CRP","CAD","PulseRate","HYPERTENSION","PAcm","RVEDV","aortic_velocity_vmax","RAFAC","RAMinAreaInd","RVESVI","RVSVI","iaorta_area","DPAcmInd","PAtoARsys","RVEDVI","imitral_regurgitation","LVESV","PAcmInd","aortic_velocity_vmax_ao_adjusted","aortic_velocity_vmin","AscAortaDiam","HF","LVmass-EDVratio","PVD","RAMaxAreaInd","RVESV","PADinT2D","PAStraincm","ao_regurgitation_fraction","LVmass","MyocardialT1","AbAA","CADinNonT2D","PAH","RVEF","AscAortaDiamInd","NICM","PAtoARdia","RVSV","tLVSV","RootcmInd","PulsePress","Rootcm","HR","AAC","SVL","VaricoseVeins","MAP","AnyCVD","CK","RVEDVtoLVEDV","ao_regurgitation_volume","CAC","RVESVtoLVESV","SVI","netLVSV","RVSVtoLVSV","DPAcm","LVEDV","PAD_neversmk","DBP","RAMaxArea","MI","fLVSV","LVEDVI","PAD_eversmk","RVEFtoLVEF","Cardiomyopathy","DescAortaDiam","MVP","RAMinArea","cIMT","LVESVI","PADnonT2D","SCAD","AorticStenosis","LVmassBSAindexed","PAD","LVEF")
+
+diabetic_complications_group <- c("CADinT2D","PVDinT2D","DME","ESRDinT2D","PDRvNoDRwDoD","PDRvNoPDRwDoD","DRvNoDRwDoD","PDRvNoPDR","CKDinT2D","MIinT2D","DRvNoDR","PDRvNoDR","AlbInT2D","CVDinT2D","StrokeinT2D","DiabeticRetino","NPDRvNoDR","AnyCVDinT2D","MacroInT2D","MicroInT2D","HypertensioninT2D","ClaudicationinT2D","DiabeticNephro","NAFLDinT2D","NPDRvNoDRwDoD","CKD_DNinT2D","NeuropathyinT2D","CADinT1D")
+
+ecg_traits_group <- c("QRS","PRI","Pwave_duration","LongQT","RRinterval","QTc")
+
+glycemic_group <- c("FI","HOMAIR","2hrI","BSandFG","CIR","AUCins","AdiponectinadjBMI","ISenBMI","SmokingFGint","AUCinsAUCgluc","FGovertime","2hrGadjBMI","BSadjFastingTime","ISIadjBMIinterGenoBMI","IFC","IFCadjBMI","T2D_insulin-resistant","PIadjBMI","FG_plus_diab","FGadjBMI","CPEP_FAST","HBA1CMMOL","HOMAB","IGI","T2D_obesity-related","FIadjBMI","Ins30adjBMI","T2D","PancreasIron","Spleen_volume","AIR","T2D_insulin-deficient","YouthT2D","ISIadjAgeSex","Incr30","2hrG","2hrCPEP","ISen","T2DadjBMI","HBA1C","DIadjBMI","PEAK","PancreasFat","T2D_autoimmune","Adiponectin","ISIadjAgeSexBMI","PEAKadjBMInSI","ISR","SmokingT2Djoint","SmokingT2Dmain","PEAKadjSI","CIRadjISI","Ins30","HBA1CadjBMI","SmokingT2Dint","DI","PI","SmokingFGmain","ISI","ISRadjBMI","T2D_age-related","AIRadjBMInSI","AIRadjSI","BS","FG","Pancreas_volume","SmokingFGjoint")
+
+hepatic_group <- c("ALP","AST_ALT_ratio","GGT","ALT","Cirrhosis","LiverAge","PSC","Liver_volume","BILIRUBIN","NAFLDscore","AST","DirectBilirubin","PBC","NAFLDfibrosis","LiverFat","NAFLD","Alb","LiverIron")
+
+lipid_group <- c("CHOL","nonHDL","TGnonT2D","HDL","TG","ApoA1","LDL","C18_1trans","FAw6","TotPG","C20_0","C22_5n_3","C20_4n_6","C14_0","2hrFFA","C16_0","TGinT2D","C18_0","C18_3n_3","HDL2chol","SM","TGtoHDL","IDLpart","C20_3n_6","C12_0","C22_4n_6","Dyslipid","VLDLchol","C18_1n_9","FastFFA","IDLchol","n6FA182","C18_1n_7","ApoB","HDL3chol","C10_0","LipoproteinA","RemnantC","C16_1n_7","FAw3","PUFA","C20_5n_3","LDL_CALCULATED","SFA","XXLVLDLpart","LEPadjBMI","LEP","ApoA","DHA","MUFA")
+
+metabolite_group <- c("Cit","Pyr","Ala","Gp","Val","Ca","Ferritin","Leu","His","PC","bOHBut","LDH","VitD","Ace","P","vitDBP","Gln","Gly","Phe","Sodium","TotCho","AcAce","Tyr","Glol","Ile","Phosphate","Cl","K","vitDBP_GChapAdj")
+
+metformin_response_group <- c("Change_in_HOMA_IR_after_metformin","Change_in_fasting_glucose_after_metformin_adjusted_baseline_glucose","Change_in_HOMA_B_after_metformin","Insulin_30_min_OGTT_metformin","Fasting_insulin_metformin","Change_in_fasting_insulin_after_metformin_adjusted_baseline_insulin","Glucose_120_min_OGTT_metformin_adjusted_baseline_glucose","Insulin_120_min_OGTT_metformin","Insulin_60_min_OGTT_metformin","Glucose_30_min_OGTT_metformin_adjusted_baseline_glucose","Fasting_glucose_metformin_adjusted_baseline_glucose","Glucose_60_min_OGTT_metformin_adjusted_baseline_glucose","AUC_insulin_OGTT_metformin")
+
+nutritional_group <- c("freshfruit","CarbIntakeBMIadj","CarbIntake","oilyfish","IronDef","BreakfastSkipping","PC1diet","ProteinIntake","ProteinIntakeBMIadj","FatIntakeBMIadj","FatIntake","EtOH","PC3diet","saltconsumption")
+
+ocular_group <- c("ISthickness","Neuromyelitis_optica_IgG_minus","RPE","AMD","CSI","Optic_cup_area","OSthickness","Keratoconus","PS","GA","INL","Neuromyelitis_optica","PACG","CCthickness","Optic_disc_area","GCIPL","Intraocular_pressure","ONLthickness","GCL","AMDprogression","Neuromyelitis_optica_IgG_plus","IPL","VCDR","OcularVD","ND","VFD","EarlyAMD","RNFL","CRF","CataractSenile","GCC","OPL","POAG")
+
+other_group <- c("Thyroid","CFH1_levels","CFH3_levels","CFH4_levels","Dermatophytosis","CFH2_levels","CFH_levels","PanAge","AbAge","CFH5_levels","IGF1")
+
+renal_group <- c("Creatinine","eGFRcrea","USCR","lateDKD_T2D","CKDextremesadjHbA1cBMI_T1D","MA","CKD_T1D","CKDextremes_T1D","ESRDvMacroinT2D","ESRDvNonESRD_T1D","allDKD_T1D","CKDextremes_DM","UA","eGFRcrea_DM","CKDpDKD_T1D","MAadjHbA1cBMI_T1D","Urate","allDKDadjHbA1cBMI_T1D","CKDpDKDinT2D","ESRD","allDKD_T2D","MacrovControladjHbA1cBMI_T1D","Macroalbuminuria_DM","ESRDvControlinT2D","eGFRcrea_med_DeclineInCKD","BUN","CKDpDKD","ESRDvControl_DM","SevereDKD","CKD_T2D","USPR","CKDadjHbA1cBMI_T1D","ESRDvMacro_T1D","MacrovControl_T1D","eGFRcreaRapid3","pSSNS","AllDKDvControl_DM","MN","UPCR","PUV","lateDKD_T1D","ALBUMIN","ESRDvNonESRDinT2D","SerumUrea","UMOD_antibody","eGFRcrea_med_DeclineAdjBL","CKD_DM","CSSNS","UACR","eGFRcrea_T1D","ESRD_DM","MA_T2D","ESRDvMacroadjHbA1cBMI_T1D","KSD","eGFRcrea_T2D","eGFRcrea_med_DeclineAdjDM","eGFRcrea_perc_DeclineInDM","ESRDvControladjHbA1cBMI_T1D","ESRDvMacro_DM","MA_T1D","eGFRcrea_perc_DeclineNoDM","ESRDvNonESRD_DM","MA_DM","eGFRcrea_med_DeclineInDM","lateDKDadjHbA1cBMI_T1D","ESRDvControl_T1D","IgAN","eGFRcreaCKDi25","eGFRcreaInDiabetes","CKD_EXT_vGFRinT2D","UACR_nonDM","CKDpDKD_DM","CystatinC","NaExcretion","CKD","CreatinineUrinary","Kidney_volume","UMOD_aptamer","eGFRcreaNoDiabetes","MacrovControl","eGFRcys","lateDKD","KExcretion","UACR_DM","CKDpDKDadjHbA1cBMI_T1D","ESRDvNonESRDadjHbA1cBMI_T1D","allDKD")
+
+sleep_and_circadian_group <- c("MeanSleepMidPointRN","SleepApnea","ChildSleepDuration","RAQT","SleepLong","SpO2min","Insomnia","KleineLevinSynd","MeanSleepDiurnalInactRN","MeanSleepNumEpisodesRN","SpO2per90","NeckCir","SleepInsomnia_ICD","SnoringAdjBMI","RBD","SleepNaps","AHI","AHIinREM","RA","MeanSleepM10timeRN","SleepEDS","StDevSleepDurationRN","smeq_cont","MeanSleepDurationRN","SleepApneaAdjBMI","AvgDesaturation","SleepDuration","SleepChronotype","MeanSleepEfficiencyRN","SleepShort","MeanSleepL5timeRN","NeckCiradjBMI","EaseOfWakingUp","NT1","Snoring","smeq_binary","ChildSleepDurationAdjBMI","ChronotypeSingle","SpO2avg","AHIinNREM","SleepInsomnia")
+
+stroke_group <- c("toastSAO","toastUNDETER","mRS01v23456","toastDETER","mRSOrdinalAdjSever","EO_Stroke_ischemic","toastLAA","CCScUNDETER","Stroke_lobar","CCScSAO","IAU","SAH","lobarSVS","CCSpCEmajincl","IA","Stroke_smallvessel","Stroke_hemorrhagic","Stroke_largeartery","nonlobarSVS","PSMR","CCScCEmajor","mRS012v3456AdjSever","mRS01v23456AdjSever","Stroke","Stroke_deep","allSVS","mRSOrdinal","Stroke_ischemic","toastCE","CCSpSAOmajincl","LacunarStroke","CCSpLAAmajincl","mRS012v3456","CCScLAA","CCScINCUNC","CCSpCryptoincl","Stroke_cardioembolic","CCScCRYPTCE")
+
+sulfonylurea_response_group <- c("Glucose_120_min_glipizide_adjusted_baseline_glucose","Insulin_60_min_glipizide","Glucose_60_min_glipizide_adjusted_baseline_glucose","Slope_to_glucose_recovery_glipizide_adjusted_baseline_glucose","Glucose_180_min_glipizide_adjusted_baseline_glucose","Insulin_120_min_glipizide","Time_to_glucose_trough_glipizide","Time_to_peak_insulin_glipizide","Insulin_30_min_glipizide","Slope_to_glucose_trough_glipizide_adjusted_baseline_glucose","Glucose_240_min_glipizide_adjusted_baseline_glucose","Glucose_90_min_glipizide_adjusted_baseline_glucose","Glucose_30_min_glipizide_adjusted_baseline_glucose","Insulin_240_min_glipizide","Insulin_180_min_glipizide","Glucose_trough_glipizide_adjusted_baseline_glucose","Insulin_90_min_glipizide","Peak_insulin_glipizide_adjusted_baseline_insulin")
+
+type_1_diabetes_group <- c("T1D")
+```
+
+## Group analysis
+
+Trying to add the phenotype group information to the dataframe - I was having some issues with this but it should be a quick fix. Just want to add this information in a new column. Is there overlap between some of these groups?
+
+```{r}
+#| label: Group analysis
+
+test_df %>% 
+  mutate(phenotype_group = case_when(phenotype %in% anthropometric_group ~ "Anthropometric",
+                                     phenotype %in% atrial_fibrillation_group ~ "Atrial fibrillation",
+                                     phenotype %in% cardiovascular_group ~ "Cardiovascular",
+                                     phenotype %in% diabetic_complications_group ~ "Diabetic complications",
+                                     phenotype %in% ecg_traits_group ~ "ECG traits",
+                                     phenotype %in% glycemic_group ~ "Glycemic",
+                                     phenotype %in% hepatic_group ~ "Hepatic",
+                                     phenotype %in% lipid_group ~ "Lipid",
+                                     phenotype %in% metabolite_group ~ "Metabolite",
+                                     phenotype %in% metformin_response_group ~ "Metformin response",
+                                     phenotype %in% nutritional_group ~ "Nutritional",
+                                     phenotype %in% ocular_group ~ "Ocular",
+                                     phenotype %in% anthropometric_group ~ "Anthropometric",
+                                     phenotype %in% anthropometric_group ~ "Anthropometric",
+                                     phenotype %in% anthropometric_group ~ "Anthropometric",
+                                     phenotype %in% anthropometric_group ~ "Anthropometric",
+                                     ))
+```
