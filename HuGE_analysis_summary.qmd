@@ -102,6 +102,18 @@ for (query in DE_genes_h) {
 
 This is a big work in progress
 
+### Relevant information about HuGe scores
+
+| HuGE score value | Evidence level |
+|------------------|----------------|
+| 1                | No evidence    |
+| \>1              | Anecdotal      |
+| ≥3               | Moderate       |
+| ≥10              | Strong         |
+| ≥30              | Very strong    |
+| ≥100             | Extreme        |
+| ≥350             | Compelling     |
+
 ```{r}
 #this graphs each gene together for a single phenotype - good example of what you can do!
 ggplot(test_df %>% filter(phenotype == "CHOL"), #you currently have to manually set the group you are interested in
@@ -111,6 +123,7 @@ ggplot(test_df %>% filter(phenotype == "CHOL"), #you currently have to manually 
   labs(y = "Log(HuGE score)", #they put this on a log scale!
        x = "Gene") + 
   theme_bw()
+test_df
 ```
 
 # HuGeAMP groups
