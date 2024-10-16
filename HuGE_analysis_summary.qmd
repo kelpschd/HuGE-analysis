@@ -33,7 +33,7 @@ Keep in mind that HuGEAMP focuses on *human* genes, so you will want all of the 
 
 ```{r}
 #| label: Load in required packages
-DE_genes_h <- c("APOB", "PCSK9") #update with any genes of interest, can be as long as you want!
+DE_genes_h <- c("APOB", "CREB3L3") #update with any genes of interest, can be as long as you want!
 ```
 
 ## Get human orthologs of ZF genes
@@ -68,31 +68,34 @@ DE_genes_h <- cbind(external_gene_name, human_gene_name) %>%
   pull(human_gene_name)
 ```
 
-# Query HuGeAMP database
+# Query HuGeAMP database for phenotype and associated HuGE score
 
 ```{r}
-#| label: Get human orthologs of ZF genes
+#| label: Query HuGeAMP database for phenotype and associated HuGE score
 index <- "huge" 
 base_url_bioindex <- "https://bioindex.hugeamp.org"
 endpoint_bioindex <- paste0("/api/bio/query/", index)
 req_bioindex <- request(paste0(base_url_bioindex, endpoint_bioindex))
 
 #generate the dataframe you will write data to
-test_df <- tibble()
+huge_df <- tibble()
 
 #query HuGeAMP database 
 for (query in DE_genes_h) {
   query <- list(q = query)
   
-  test <- req_bioindex %>%
+  huge_data <- req_bioindex %>%
     req_url_query(!!!query) %>%
     req_perform() %>%
     resp_body_string() %>%
     fromJSON()
   
   #write query to the dataframe
-  test_df <- bind_rows(as_tibble(test$data), test_df)
-  
+  huge_df <- bind_rows(as_tibble(huge_data$data), huge_df)
+    
+  huge_df <- huge_df %>%
+    mutate(locus = paste0(chromosome, ":", start, "-", end))
+
   #note when a query was finished
   print(paste(query, "was a success!"))
 }
@@ -116,14 +119,46 @@ This is a big work in progress
 
 ```{r}
 #this graphs each gene together for a single phenotype - good example of what you can do!
-ggplot(test_df %>% filter(phenotype == "CHOL"), #you currently have to manually set the group you are interested in
+ggplot(huge_df %>% filter(phenotype == "CHOL"), #you currently have to manually set the group you are interested in
        aes(x = reorder(gene, huge), 
            y = log(huge))) +
   stat_summary(geom = "bar", fun.y = mean, position = "dodge") +
   labs(y = "Log(HuGE score)", #they put this on a log scale!
        x = "Gene") + 
   theme_bw()
-test_df
+```
+
+# Query HuGeAMP database for top associated variants
+
+```{r}
+#| label: Query HuGeAMP database for top associated variants
+index <- "huge" 
+base_url_bioindex <- "https://bioindex.hugeamp.org"
+endpoint_bioindex <- paste0("/api/bio/query/top-associations/?q=", index)
+req_bioindex <- request(paste0(base_url_bioindex, endpoint_bioindex))
+
+#generate the dataframe you will write data to
+variants_df <- tibble()
+
+#query HuGeAMP database 
+for (query in DE_genes_h) {
+  query <- list(q = query)
+  
+  variants <- req_bioindex %>%
+    req_url_query(!!!query) %>%
+    req_perform() %>%
+    resp_body_string() %>%
+    fromJSON()
+  
+  variants <- as_tibble(variants$data) %>%
+    mutate(queried_gene = query)
+  
+  #write query to the dataframe
+  variants_df <- bind_rows(as_tibble(variants), variants_df)
+  
+  #note when a query was finished
+  print(paste(query, "was a success!"))
+}
 ```
 
 # HuGeAMP groups
